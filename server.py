@@ -46,6 +46,18 @@ BASE_PROMPT = (
     "exactly as they are in image 1. Photorealistic result."
 )
 
+# Used instead of BASE_PROMPT when there is a secondary fabric (image 3): the parts
+# the user names get it first, and the main fabric then goes on whatever is left.
+SECONDARY_PROMPT = (
+    "Edit the piece of furniture in image 1. First, upholster these parts of it with the "
+    "fabric shown in image 3: {where}. Then reupholster every other upholstered surface "
+    "of the furniture with the fabric shown in image 2. Match each fabric exactly: the "
+    "same color, pattern, weave and sheen, at a realistic scale, following the existing "
+    "seams, folds and contours. Keep the furniture's shape and proportions, its legs and "
+    "any wood or metal parts, the room, the camera angle and the lighting exactly as "
+    "they are in image 1. Photorealistic result."
+)
+
 _render_lock = threading.Lock()
 _state = {"model_name": None, "model": None, "phase": "idle", "progress": None, "download": None}
 
@@ -170,6 +182,7 @@ def render(payload):
     seed = payload.get("seed")
     seed = int(seed) if seed not in (None, "") else random.randint(0, 2**31 - 1)
     notes = str(payload.get("notes", "")).strip()[:500]
+    where = str(payload.get("where", "")).strip()[:200].rstrip(".!?;:, ")
     label = "".join(c if c.isalnum() or c in "-_" else "-" for c in str(payload.get("label", "fabric")))[:40]
 
     furniture = decode_image(payload.get("furniture"))
@@ -177,8 +190,17 @@ def render(payload):
     width, height = fit_size(*furniture.size, long_side)
     furniture = furniture.resize((width, height), Image.LANCZOS)
     fabric.thumbnail((1024, 1024), Image.LANCZOS)
+    secondary = decode_image(payload["secondary"]) if payload.get("secondary") else None
 
-    prompt = BASE_PROMPT + (f" Additional instructions: {notes}" if notes else "")
+    if secondary:
+        if not where:
+            raise ValueError("Say where the secondary fabric goes.")
+        secondary.thumbnail((1024, 1024), Image.LANCZOS)
+        prompt = SECONDARY_PROMPT.replace("{where}", where)
+    else:
+        prompt = BASE_PROMPT
+    if notes:
+        prompt += f" Additional instructions: {notes}"
 
     with _render_lock:
         started = time.time()
@@ -191,10 +213,14 @@ def render(payload):
                 fabric_path = os.path.join(tmp, "fabric.png")
                 furniture.save(furniture_path)
                 fabric.save(fabric_path)
+                image_paths = [furniture_path, fabric_path]
+                if secondary:
+                    image_paths.append(os.path.join(tmp, "secondary.png"))
+                    secondary.save(image_paths[-1])
                 kwargs = {
                     "seed": seed,
                     "prompt": prompt,
-                    "image_paths": [furniture_path, fabric_path],
+                    "image_paths": image_paths,
                     "num_inference_steps": steps,
                     "width": width,
                     "height": height,

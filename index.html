@@ -176,6 +176,8 @@
   }
   .lightbox .close:hover { background: rgba(255, 255, 255, 0.15); }
   .card .stage.error { color: var(--danger); white-space: pre-wrap; text-align: left; font-size: 13px; }
+  #secondaryDetails { display: flex; flex-direction: column; gap: 8px; }
+  #secondaryRemove { align-self: flex-start; }
   .card footer { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
   .card footer img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); }
   .card .meta { flex: 1; min-width: 0; }
@@ -222,7 +224,23 @@
     </section>
 
     <section>
-      <h2>3. Options</h2>
+      <h2>3. Secondary fabric (optional)</h2>
+      <div class="drop" id="secondaryDrop" style="min-height:84px">
+        <span id="secondaryHint">Drop a second fabric for details such as cushions or piping, or click to choose</span>
+        <img id="secondaryPreview" alt="Your secondary fabric" hidden>
+        <input type="file" id="secondaryInput" accept="image/*" aria-label="Secondary fabric photo">
+      </div>
+      <div id="secondaryDetails" hidden>
+        <label for="where">Where it goes
+          <textarea id="where" maxlength="200" placeholder="e.g. the seat cushions; the two throw pillows"></textarea>
+        </label>
+        <button type="button" class="small" id="secondaryRemove">Remove secondary fabric</button>
+      </div>
+      <p class="hint">Every render uses it on the parts you name, and the sample fabric everywhere else.</p>
+    </section>
+
+    <section>
+      <h2>4. Options</h2>
       <label for="notes">Extra instructions (optional)
         <textarea id="notes" placeholder="e.g. keep the throw pillows as they are; make the stripes run vertically"></textarea>
       </label>
@@ -287,7 +305,7 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const state = { furniture: null, fabrics: [], queue: [], running: false, nextId: 1 };
+  const state = { furniture: null, fabrics: [], secondary: null, queue: [], running: false, nextId: 1 };
 
   // Shrink photos in the browser so uploads stay small; also applies phone rotation.
   async function toDataUrl(file, maxSide) {
@@ -311,6 +329,9 @@
     if (!state.furniture || !n) {
       go.disabled = true;
       go.textContent = !state.furniture ? "Add a furniture photo" + (n ? "" : " and a fabric") : "Add at least one fabric";
+    } else if (state.secondary && !$("where").value.trim()) {
+      go.disabled = true;
+      go.textContent = "Say where the secondary fabric goes";
     } else {
       go.disabled = false;
       go.textContent = n === 1 ? "Render in this fabric" : "Render in " + n + " fabrics";
@@ -366,6 +387,33 @@
     drawSwatches(); refreshButton();
   }
 
+  function showSecondary() {
+    const fabric = state.secondary;
+    $("secondaryPreview").hidden = !fabric;
+    $("secondaryHint").hidden = !!fabric;
+    $("secondaryDetails").hidden = !fabric;
+    if (fabric) { $("secondaryPreview").src = fabric.dataUrl; $("secondaryPreview").alt = fabric.name; }
+    else $("secondaryPreview").removeAttribute("src");
+    refreshButton();
+  }
+
+  async function addSecondary(files) {
+    const file = [...files].find((f) => f.type.startsWith("image/"));
+    if (!file) return;
+    try {
+      state.secondary = {
+        name: file.name.replace(/\.[^.]+$/, "") || "secondary",
+        dataUrl: await toDataUrl(file, 1024),
+      };
+    } catch (e) {
+      setStatus("Could not read that photo. Try a JPEG or PNG.");
+    }
+    showSecondary();
+  }
+
+  $("secondaryRemove").addEventListener("click", () => { state.secondary = null; showSecondary(); });
+  $("where").addEventListener("input", refreshButton);
+
   function wireDrop(dropId, inputId, handler) {
     const drop = $(dropId), input = $(inputId);
     // Copy the lists: the handlers are async, and the browser empties the original
@@ -381,6 +429,7 @@
   }
   wireDrop("furnitureDrop", "furnitureInput", addFurniture);
   wireDrop("fabricDrop", "fabricInput", addFabrics);
+  wireDrop("secondaryDrop", "secondaryInput", addSecondary);
 
   function makeCard(job) {
     const card = document.createElement("article");
@@ -390,10 +439,16 @@
     const footer = document.createElement("footer");
     const thumb = document.createElement("img");
     thumb.src = job.fabric.dataUrl; thumb.alt = "";
+    footer.append(thumb);
+    if (job.secondary) {
+      const thumb2 = document.createElement("img");
+      thumb2.src = job.secondary.dataUrl; thumb2.alt = "";
+      footer.append(thumb2);
+    }
     const meta = document.createElement("div");
     meta.className = "meta";
     const name = document.createElement("div");
-    name.className = "name"; name.textContent = job.fabric.name;
+    name.className = "name"; name.textContent = jobName(job);
     const sub = document.createElement("div");
     sub.className = "sub";
     meta.append(name, sub);
@@ -401,17 +456,21 @@
     again.type = "button"; again.className = "small"; again.textContent = "Try again";
     again.title = "Render this fabric again with a different random variation";
     again.disabled = true;
-    again.addEventListener("click", () => enqueue([job.fabric], job.furniture));
+    again.addEventListener("click", () => enqueue([job.fabric], job.furniture, job.secondary, job.where));
     const save = document.createElement("a");
     save.className = "small"; save.textContent = "Save"; save.hidden = true;
-    footer.append(thumb, meta, again, save);
+    footer.append(meta, again, save);
     card.append(stage, footer);
     job.el = { card, stage, sub, again, save };
     return card;
   }
 
-  function enqueue(fabrics, furniture) {
-    const jobs = fabrics.map((fabric) => ({ id: state.nextId++, fabric, furniture }));
+  function jobName(job) {
+    return job.secondary ? job.fabric.name + " + " + job.secondary.name : job.fabric.name;
+  }
+
+  function enqueue(fabrics, furniture, secondary, where) {
+    const jobs = fabrics.map((fabric) => ({ id: state.nextId++, fabric, furniture, secondary, where }));
     $("empty").hidden = true;
     $("results").prepend(...jobs.map(makeCard));
     jobs.forEach((job) => { job.el.stage.textContent = "Waiting in line"; state.queue.push(job); });
@@ -498,7 +557,7 @@
     stage.textContent = "";
     stage.append(bar.el);
     bar.set(null, "Starting");
-    setStatus("Working on " + job.fabric.name + (state.queue.length ? ", " + state.queue.length + " more waiting" : ""));
+    setStatus("Working on " + jobName(job) + (state.queue.length ? ", " + state.queue.length + " more waiting" : ""));
     try {
       const response = await fetch("/api/render", {
         method: "POST",
@@ -506,7 +565,9 @@
         body: JSON.stringify({
           furniture: job.furniture,
           fabric: job.fabric.dataUrl,
-          label: job.fabric.name,
+          secondary: job.secondary ? job.secondary.dataUrl : null,
+          where: job.secondary ? job.where : "",
+          label: jobName(job),
           notes: $("notes").value,
           model: $("model").value,
           size: Number($("size").value),
@@ -517,12 +578,12 @@
       if (!response.ok) throw new Error(data.error || "The render failed.");
       const img = document.createElement("img");
       img.src = data.image;
-      img.alt = "Furniture rendered in " + job.fabric.name;
+      img.alt = "Furniture rendered in " + jobName(job);
       const zoom = document.createElement("button");
       zoom.type = "button"; zoom.className = "zoom";
       zoom.title = "View larger";
       zoom.append(img);
-      zoom.addEventListener("click", () => openLightbox(img.src, img.alt, job.fabric.name));
+      zoom.addEventListener("click", () => openLightbox(img.src, img.alt, jobName(job)));
       stage.textContent = ""; stage.className = "stage done"; stage.append(zoom);
       sub.textContent = data.width + " × " + data.height + " · " + data.seconds + " s";
       save.href = data.image; save.download = data.file; save.hidden = false;
@@ -644,7 +705,7 @@
   });
 
   $("go").addEventListener("click", () => {
-    enqueue(state.fabrics, state.furniture);
+    enqueue(state.fabrics, state.furniture, state.secondary, $("where").value.trim());
   });
 
   fetch("/api/status").then((r) => r.json()).then((s) => {

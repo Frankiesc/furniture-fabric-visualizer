@@ -8,6 +8,8 @@ renders the piece in each fabric. The image model (FLUX.2 klein, run through
 Nothing is uploaded.
 
 - **Batch renders:** one render per fabric sample, queued and shown side by side.
+- **Secondary fabric:** add a second fabric and say which parts it goes on, such
+  as the cushions or piping.
 - **Close-up view:** click a render to see it larger, then zoom in and pan to
   check the weave, pattern scale and seams.
 - **Progress as it works:** each render shows its steps, and the first run shows
@@ -76,7 +78,11 @@ the app is running.
 
 1. **Furniture:** one clear, well-lit photo.
 2. **Fabrics:** flat, evenly lit close-ups. Each one produces its own render.
-3. **Render**, then use the results:
+3. **Secondary fabric (optional):** a second fabric, plus a few words on where it
+   goes, e.g. "the seat cushions". Every render uses it on those parts and the
+   sample fabric everywhere else. The model reads this as a description, so it
+   does not always follow it.
+4. **Render**, then use the results:
    - **Click a render** to see it larger. Pinch or Cmd-scroll to zoom in, and
      scroll or drag to move around. The **−**, **100%** and **+** buttons and
      Cmd `=` / `-` / `0` work too.
@@ -93,7 +99,9 @@ Set these when starting the app:
 | `QUANTIZE=4 bash run.sh` | Uses less memory. The default is `8`; `0` is full precision. |
 | `PORT=9000 bash run.sh` | Changes the port. |
 
-The instruction sent to the model is `BASE_PROMPT` at the top of `server.py`.
+The instruction sent to the model is `BASE_PROMPT` at the top of `server.py`, or
+`SECONDARY_PROMPT` when there is a secondary fabric. Extra instructions are added
+to the end of either.
 
 ## Troubleshooting
 
