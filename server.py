@@ -47,7 +47,62 @@ BASE_PROMPT = (
 )
 
 _render_lock = threading.Lock()
-_state = {"model_name": None, "model": None, "phase": "idle"}
+_state = {"model_name": None, "model": None, "phase": "idle", "progress": None, "download": None}
+
+
+class StepProgress:
+    """mflux callback that reports how far the current render has got."""
+
+    def call_before_loop(self, seed, prompt, latents, config, **kwargs):
+        _state["progress"] = {"step": 0, "steps": config.num_inference_steps}
+
+    def call_in_loop(self, t, seed, prompt, latents, config, time_steps, **kwargs):
+        import mlx.core as mx
+
+        # MLX is lazy: finish this step's work before counting it as done.
+        mx.eval(latents)
+        progress = _state["progress"]
+        _state["progress"] = {"step": progress["step"] + 1, "steps": progress["steps"]}
+
+
+def _track_downloads():
+    """Report model download progress to the page. mflux downloads weights with
+    huggingface_hub's snapshot_download, which takes a tqdm class for its progress."""
+    from huggingface_hub.utils import tqdm
+    from mflux.models.common.resolution import path_resolution
+
+    if getattr(path_resolution.snapshot_download, "tracked", False):
+        return
+
+    class Progress(tqdm):
+        # snapshot_download keeps one byte counter for the whole model, and its total
+        # grows as each file starts. Count here too: a bar that isn't shown (no
+        # terminal) does not keep its own count.
+        def __init__(self, *args, **kwargs):
+            self.tracked = kwargs.get("name") == "huggingface_hub.snapshot_download"
+            self.done = kwargs.get("initial") or 0
+            super().__init__(*args, **kwargs)
+
+        def update(self, n=1):
+            if self.tracked:
+                self.done += n or 0
+                _state["download"] = {"done": self.done, "total": self.total or 0}
+            return super().update(n)
+
+    original = path_resolution.snapshot_download
+
+    def snapshot_download(*args, **kwargs):
+        if kwargs.get("local_files_only"):
+            return original(*args, **kwargs)
+        _state["phase"] = "downloading"
+        try:
+            return original(*args, tqdm_class=Progress, **kwargs)
+        finally:
+            _state["phase"] = "loading"
+            _state["download"] = None
+
+    snapshot_download.tracked = True
+    path_resolution.snapshot_download = snapshot_download
 
 
 def _accepted(func, kwargs):
@@ -72,6 +127,7 @@ def load_model(name):
     from mflux.models.common.config import ModelConfig
     from mflux.models.flux2.variants import Flux2KleinEdit
 
+    _track_downloads()
     config = getattr(ModelConfig, MODELS[name])()
     kwargs = {"model_config": config}
     if QUANTIZE:
@@ -79,6 +135,7 @@ def load_model(name):
     print(f"[model] loading {name} (quantize={QUANTIZE or 'off'}). "
           "The first run downloads the weights; progress shows below.", flush=True)
     model = Flux2KleinEdit(**_accepted(Flux2KleinEdit.__init__, kwargs))
+    model.callbacks.register(StepProgress())
     _state["model"] = model
     _state["model_name"] = name
     print(f"[model] {name} ready", flush=True)
@@ -128,6 +185,7 @@ def render(payload):
         try:
             model = load_model(model_name)
             _state["phase"] = "rendering"
+            _state["progress"] = None
             with tempfile.TemporaryDirectory() as tmp:
                 furniture_path = os.path.join(tmp, "furniture.png")
                 fabric_path = os.path.join(tmp, "fabric.png")
@@ -153,6 +211,7 @@ def render(payload):
                     result.save(str(out_path))
         finally:
             _state["phase"] = "idle"
+            _state["progress"] = None
 
     data = base64.b64encode(out_path.read_bytes()).decode()
     return {
@@ -196,6 +255,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/status":
             self._json(200, {
                 "phase": _state["phase"],
+                "progress": _state["progress"],
+                "download": _state["download"],
                 "loaded": _state["model_name"],
                 "models": list(MODELS),
                 "quantize": QUANTIZE,

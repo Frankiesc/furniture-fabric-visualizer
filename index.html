@@ -129,6 +129,17 @@
   }
   .card .stage.done { padding: 0; }
 
+  /* Progress inside a render card while it works; indeterminate while the time is unknown. */
+  .progress { width: min(320px, 100%); display: flex; flex-direction: column; gap: 8px; }
+  .progress .track { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .progress .fill { height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width 1s linear; }
+  .progress.indeterminate .fill { width: 30%; animation: progress-slide 1.4s ease-in-out infinite; }
+  @keyframes progress-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .progress .fill { transition: none; }
+    .progress.indeterminate .fill { animation: none; width: 100%; opacity: 0.4; }
+  }
+  .progress .label { font-size: 13px; font-variant-numeric: tabular-nums; text-wrap: balance; }
   .card .stage img { width: 100%; display: block; }
   .card .stage .zoom { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
   .card .stage .zoom:focus-visible { outline-offset: -2px; }
@@ -240,7 +251,7 @@
     </section>
 
     <button class="primary" id="go" disabled>Add a furniture photo and a fabric</button>
-    <p class="hint" id="status">The first render loads the model, and the very first one downloads it. Watch Terminal for download progress.</p>
+    <p class="hint" id="status">The first render loads the model, and the very first one downloads it. Progress shows on the render.</p>
   </div>
 
   <div class="output" role="region" aria-labelledby="rendersTitle">
@@ -413,21 +424,78 @@
     setStatus("Done. Renders are also saved in the renders folder next to the app.");
   }
 
+  // A progress bar for a render card. set(null, text) shows it as indeterminate.
+  function progressBar() {
+    const el = document.createElement("div"), track = document.createElement("div");
+    const fill = document.createElement("div"), label = document.createElement("div");
+    el.className = "progress"; track.className = "track"; fill.className = "fill"; label.className = "label";
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    track.append(fill);
+    el.append(track, label);
+    return {
+      el,
+      set(fraction, text) {
+        el.classList.toggle("indeterminate", fraction === null);
+        if (fraction === null) {
+          fill.style.width = "";
+          track.removeAttribute("aria-valuenow");
+        } else {
+          const percent = Math.round(Math.min(1, fraction) * 100);
+          fill.style.width = percent + "%";
+          track.setAttribute("aria-valuenow", String(percent));
+        }
+        track.setAttribute("aria-valuetext", text);
+        label.textContent = text;
+      },
+    };
+  }
+
+  const gb = (bytes) => (bytes / 1e9).toFixed(1);
+  const duration = (secs) => secs < 90 ? "about " + Math.max(5, Math.round(secs / 5) * 5) + " s"
+    : secs < 5400 ? "about " + Math.round(secs / 60) + " min" : "about " + (secs / 3600).toFixed(1) + " h";
+
   async function run(job) {
     const { stage, sub, again, save } = job.el;
     const started = Date.now();
-    let phase = "rendering";
-    const tick = setInterval(async () => {
-      try {
-        const s = await (await fetch("/api/status")).json();
-        phase = s.phase === "loading" ? "loading" : "rendering";
-      } catch (e) { /* server busy; keep the last phase */ }
+    const bar = progressBar();
+    let status = { phase: "rendering" }, firstSample = null, steps = null;
+    const show = () => {
       const secs = Math.round((Date.now() - started) / 1000);
-      stage.textContent = phase === "loading"
-        ? "Loading the model (" + secs + " s). The first time this includes the download; see Terminal."
-        : "Rendering (" + secs + " s)";
-    }, 1500);
-    stage.textContent = "Starting";
+      const { phase, progress, download } = status;
+      if (phase === "downloading") {
+        if (!download || !download.total) return bar.set(null, "Starting the model download");
+        // The download speed so far gives the time left; wait for a few seconds of data first.
+        const now = Date.now();
+        if (!firstSample) firstSample = { at: now, done: download.done };
+        const rate = (download.done - firstSample.done) / (now - firstSample.at);
+        const left = now - firstSample.at > 5000 && rate > 0 ? (download.total - download.done) / rate / 1000 : null;
+        bar.set(download.done / download.total, "Downloading the model · " + gb(download.done) + " of " + gb(download.total) + " GB"
+          + (left === null ? "" : " · " + duration(left) + " left"));
+      } else if (phase === "loading") {
+        bar.set(null, "Loading the model (" + secs + " s)");
+      } else if (!progress) {
+        bar.set(0.02, "Preparing (" + secs + " s)");
+      } else {
+        // Nearly all the time goes into the steps, which take about equally long. Once one
+        // has finished, move the bar smoothly through the current step using their average.
+        const now = Date.now(), { step, steps: total } = progress;
+        if (!steps || steps.step !== step) steps = { step, at: now, first: steps ? steps.first : now };
+        const average = step ? (steps.at - steps.first) / step : 0;
+        const partial = average ? Math.min(0.9, (now - steps.at) / average) : 0;
+        bar.set(0.02 + 0.95 * Math.min(step + partial, total) / total,
+          (step < total ? "Rendering · step " + (step + 1) + " of " + total : "Finishing") + " (" + secs + " s)");
+      }
+    };
+    const tick = setInterval(async () => {
+      try { status = await (await fetch("/api/status")).json(); }
+      catch (e) { /* server busy; keep the last status */ }
+      show();
+    }, 1000);
+    stage.textContent = "";
+    stage.append(bar.el);
+    bar.set(null, "Starting");
     setStatus("Working on " + job.fabric.name + (state.queue.length ? ", " + state.queue.length + " more waiting" : ""));
     try {
       const response = await fetch("/api/render", {
