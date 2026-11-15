@@ -368,14 +368,16 @@
 
   function wireDrop(dropId, inputId, handler) {
     const drop = $(dropId), input = $(inputId);
-    input.addEventListener("change", () => { handler(input.files); input.value = ""; });
+    // Copy the lists: the handlers are async, and the browser empties the original
+    // (when the input is reset, or after the drop event) before they finish.
+    input.addEventListener("change", () => { handler([...input.files]); input.value = ""; });
     ["dragenter", "dragover"].forEach((type) => drop.addEventListener(type, (e) => {
       e.preventDefault(); drop.classList.add("over");
     }));
     ["dragleave", "drop"].forEach((type) => drop.addEventListener(type, (e) => {
       e.preventDefault(); drop.classList.remove("over");
     }));
-    drop.addEventListener("drop", (e) => handler(e.dataTransfer.files));
+    drop.addEventListener("drop", (e) => handler([...e.dataTransfer.files]));
   }
   wireDrop("furnitureDrop", "furnitureInput", addFurniture);
   wireDrop("fabricDrop", "fabricInput", addFabrics);
