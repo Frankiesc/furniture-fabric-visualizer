@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fabric Fitting Room</title>
+<style>
+  /* Layout: fixed-width control column on the left (inputs), results grid on the right. */
+  :root {
+    --bg: #eef0f3;
+    --surface: #ffffff;
+    --ink: #1c222b;
+    --muted: #5d6877;
+    --line: #d3d8df;
+    --accent: #2b4a8f;
+    --accent-ink: #ffffff;
+    --danger: #a3271c;
+    --font-display: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181e;
+      --surface: #1d232c;
+      --ink: #e7eaef;
+      --muted: #98a2b1;
+      --line: #323a47;
+      --accent: #8fabeb;
+      --accent-ink: #10141a;
+      --danger: #f08a80;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 var(--font-body);
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    padding: 18px 24px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { font: 600 22px/1.2 var(--font-display); margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  main {
+    display: grid; grid-template-columns: 340px 1fr; gap: 24px;
+    padding: 24px; align-items: start;
+  }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; padding: 16px; } }
+
+  .panel { display: flex; flex-direction: column; gap: 20px; }
+  section { display: flex; flex-direction: column; gap: 8px; }
+  h2 {
+    font: 600 12px/1.2 var(--font-display); letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted); margin: 0;
+  }
+  .drop {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    min-height: 120px; padding: 14px; text-align: center;
+    background: var(--surface); border: 1.5px dashed var(--line); border-radius: 8px;
+    color: var(--muted); cursor: pointer;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--ink); }
+  .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+  .drop img { max-width: 100%; max-height: 240px; border-radius: 4px; display: block; }
+  .swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .swatch { position: relative; aspect-ratio: 1; }
+  .swatch img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
+  .swatch button {
+    position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0;
+    border-radius: 50%; border: 1px solid var(--line); background: var(--surface);
+    color: var(--ink); font-size: 13px; line-height: 1; cursor: pointer;
+  }
+  label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  textarea, select {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button { font: inherit; }
+  button:focus-visible, a:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .primary {
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px;
+    padding: 12px 16px; font-weight: 600; cursor: pointer;
+  }
+  .primary:disabled { opacity: 0.45; cursor: not-allowed; }
+  .hint { font-size: 13px; color: var(--muted); margin: 0; }
+  .banner {
+    padding: 10px 14px; border-radius: 8px; border: 1px solid var(--danger);
+    color: var(--danger); background: var(--surface); font-size: 14px;
+  }
+  [hidden] { display: none !important; }
+
+  .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+  .empty {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 28px; max-width: 60ch;
+  }
+  .empty h3 { font: 600 17px/1.3 var(--font-display); margin: 0 0 10px; }
+  .empty ol { margin: 0; padding-left: 20px; color: var(--muted); }
+  .empty li + li { margin-top: 6px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .card .stage {
+    background: var(--bg); min-height: 220px; display: flex; align-items: center;
+    justify-content: center; padding: 16px; text-align: center; color: var(--muted);
+  }
+  .card .stage.done { padding: 0; }
+  .card .stage img { width: 100%; display: block; }
+  .card .stage.error { color: var(--danger); white-space: pre-wrap; text-align: left; font-size: 13px; }
+  .card footer { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .card footer img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); }
+  .card .meta { flex: 1; min-width: 0; }
+  .card .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .small {
+    background: transparent; color: var(--accent); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer; text-decoration: none;
+  }
+  .small:hover { border-color: var(--accent); }
+  .small:disabled { opacity: 0.45; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Fabric Fitting Room</h1>
+  <p>See your furniture in a new fabric before you reupholster. Everything runs on this Mac.</p>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="banner" id="offline" hidden>
+      The app's engine is not running. In Terminal, run <code>bash run.sh</code> in this folder, then open
+      <code>http://127.0.0.1:8765</code>.
+    </div>
+
+    <section>
+      <h2>1. Furniture photo</h2>
+      <div class="drop" id="furnitureDrop">
+        <span id="furnitureHint">Drop a photo of the couch, sofa or chair here, or click to choose</span>
+        <img id="furniturePreview" alt="Your furniture photo" hidden>
+        <input type="file" id="furnitureInput" accept="image/*" aria-label="Furniture photo">
+      </div>
+    </section>
+
+    <section>
+      <h2>2. Fabric samples</h2>
+      <div class="drop" id="fabricDrop" style="min-height:84px">
+        <span>Drop one or more fabric photos, or click to choose</span>
+        <input type="file" id="fabricInput" accept="image/*" multiple aria-label="Fabric sample photos">
+      </div>
+      <div class="swatches" id="swatches"></div>
+      <p class="hint">Flat, evenly lit close-ups work best. You get one render per sample.</p>
+    </section>
+
+    <section>
+      <h2>3. Options</h2>
+      <label for="notes">Extra instructions (optional)
+        <textarea id="notes" placeholder="e.g. keep the throw pillows as they are; make the stripes run vertically"></textarea>
+      </label>
+      <div class="row">
+        <label for="model">Model
+          <select id="model">
+            <option value="flux2-klein-9b">klein 9B (best)</option>
+            <option value="flux2-klein-4b">klein 4B (lighter)</option>
+          </select>
+        </label>
+        <label for="size">Output size
+          <select id="size">
+            <option value="768">768 px (faster)</option>
+            <option value="1024" selected>1024 px</option>
+            <option value="1280">1280 px (slower)</option>
+          </select>
+        </label>
+      </div>
+      <label for="steps">Detail passes
+        <select id="steps">
+          <option value="4" selected>4 (standard)</option>
+          <option value="6">6</option>
+          <option value="8">8 (slowest)</option>
+        </select>
+      </label>
+    </section>
+
+    <button class="primary" id="go" disabled>Add a furniture photo and a fabric</button>
+    <p class="hint" id="status">The first render loads the model, and the very first one downloads it. Watch Terminal for download progress.</p>
+  </div>
+
+  <div>
+    <div class="results" id="results">
+      <div class="empty" id="empty">
+        <h3>Renders will appear here</h3>
+        <ol>
+          <li>Add one photo of the furniture. A clear, front-on shot in good light works best.</li>
+          <li>Add a photo of each fabric or material you are considering.</li>
+          <li>Press the button. Each fabric gets its own render, one after another.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const state = { furniture: null, fabrics: [], queue: [], running: false, nextId: 1 };
+
+  // Shrink photos in the browser so uploads stay small; also applies phone rotation.
+  async function toDataUrl(file, maxSide) {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.92);
+  }
+
+  function setStatus(text) { $("status").textContent = text; }
+
+  function refreshButton() {
+    const go = $("go");
+    const n = state.fabrics.length;
+    if (!state.furniture || !n) {
+      go.disabled = true;
+      go.textContent = !state.furniture ? "Add a furniture photo" + (n ? "" : " and a fabric") : "Add at least one fabric";
+    } else {
+      go.disabled = false;
+      go.textContent = n === 1 ? "Render in this fabric" : "Render in " + n + " fabrics";
+    }
+  }
+
+  function drawSwatches() {
+    const box = $("swatches");
+    box.textContent = "";
+    state.fabrics.forEach((fabric) => {
+      const cell = document.createElement("div");
+      cell.className = "swatch";
+      const img = document.createElement("img");
+      img.src = fabric.dataUrl; img.alt = fabric.name;
+      const remove = document.createElement("button");
+      remove.type = "button"; remove.textContent = "×";
+      remove.setAttribute("aria-label", "Remove " + fabric.name);
+      remove.addEventListener("click", () => {
+        state.fabrics = state.fabrics.filter((f) => f !== fabric);
+        drawSwatches(); refreshButton();
+      });
+      cell.append(img, remove);
+      box.append(cell);
+    });
+  }
+
+  async function addFurniture(files) {
+    const file = [...files].find((f) => f.type.startsWith("image/"));
+    if (!file) return;
+    try {
+      state.furniture = await toDataUrl(file, 1536);
+      $("furniturePreview").src = state.furniture;
+      $("furniturePreview").hidden = false;
+      $("furnitureHint").hidden = true;
+    } catch (e) {
+      setStatus("Could not read that photo. Try a JPEG or PNG.");
+    }
+    refreshButton();
+  }
+
+  async function addFabrics(files) {
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) continue;
+      try {
+        state.fabrics.push({
+          name: file.name.replace(/\.[^.]+$/, "") || "fabric",
+          dataUrl: await toDataUrl(file, 1024),
+        });
+      } catch (e) {
+        setStatus("Could not read " + file.name + ". Try a JPEG or PNG.");
+      }
+    }
+    drawSwatches(); refreshButton();
+  }
+
+  function wireDrop(dropId, inputId, handler) {
+    const drop = $(dropId), input = $(inputId);
+    input.addEventListener("change", () => { handler(input.files); input.value = ""; });
+    ["dragenter", "dragover"].forEach((type) => drop.addEventListener(type, (e) => {
+      e.preventDefault(); drop.classList.add("over");
+    }));
+    ["dragleave", "drop"].forEach((type) => drop.addEventListener(type, (e) => {
+      e.preventDefault(); drop.classList.remove("over");
+    }));
+    drop.addEventListener("drop", (e) => handler(e.dataTransfer.files));
+  }
+  wireDrop("furnitureDrop", "furnitureInput", addFurniture);
+  wireDrop("fabricDrop", "fabricInput", addFabrics);
+
+  function makeCard(job) {
+    const card = document.createElement("article");
+    card.className = "card";
+    const stage = document.createElement("div");
+    stage.className = "stage";
+    const footer = document.createElement("footer");
+    const thumb = document.createElement("img");
+    thumb.src = job.fabric.dataUrl; thumb.alt = "";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const name = document.createElement("div");
+    name.className = "name"; name.textContent = job.fabric.name;
+    const sub = document.createElement("div");
+    sub.className = "sub";
+    meta.append(name, sub);
+    const again = document.createElement("button");
+    again.type = "button"; again.className = "small"; again.textContent = "Try again";
+    again.title = "Render this fabric again with a different random variation";
+    again.disabled = true;
+    again.addEventListener("click", () => enqueue([job.fabric], job.furniture));
+    const save = document.createElement("a");
+    save.className = "small"; save.textContent = "Save"; save.hidden = true;
+    footer.append(thumb, meta, again, save);
+    card.append(stage, footer);
+    job.el = { card, stage, sub, again, save };
+    return card;
+  }
+
+  function enqueue(fabrics, furniture) {
+    const jobs = fabrics.map((fabric) => ({ id: state.nextId++, fabric, furniture }));
+    $("empty").hidden = true;
+    $("results").prepend(...jobs.map(makeCard));
+    jobs.forEach((job) => { job.el.stage.textContent = "Waiting in line"; state.queue.push(job); });
+    pump();
+  }
+
+  async function pump() {
+    if (state.running) return;
+    state.running = true;
+    while (state.queue.length) await run(state.queue.shift());
+    state.running = false;
+    setStatus("Done. Renders are also saved in the renders folder next to the app.");
+  }
+
+  async function run(job) {
+    const { stage, sub, again, save } = job.el;
+    const started = Date.now();
+    let phase = "rendering";
+    const tick = setInterval(async () => {
+      try {
+        const s = await (await fetch("/api/status")).json();
+        phase = s.phase === "loading" ? "loading" : "rendering";
+      } catch (e) { /* server busy; keep the last phase */ }
+      const secs = Math.round((Date.now() - started) / 1000);
+      stage.textContent = phase === "loading"
+        ? "Loading the model (" + secs + " s). The first time this includes the download; see Terminal."
+        : "Rendering (" + secs + " s)";
+    }, 1500);
+    stage.textContent = "Starting";
+    setStatus("Working on " + job.fabric.name + (state.queue.length ? ", " + state.queue.length + " more waiting" : ""));
+    try {
+      const response = await fetch("/api/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          furniture: job.furniture,
+          fabric: job.fabric.dataUrl,
+          label: job.fabric.name,
+          notes: $("notes").value,
+          model: $("model").value,
+          size: Number($("size").value),
+          steps: Number($("steps").value),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "The render failed.");
+      const img = document.createElement("img");
+      img.src = data.image;
+      img.alt = "Furniture rendered in " + job.fabric.name;
+      stage.textContent = ""; stage.className = "stage done"; stage.append(img);
+      sub.textContent = data.width + " × " + data.height + " · " + data.seconds + " s";
+      save.href = data.image; save.download = data.file; save.hidden = false;
+    } catch (error) {
+      stage.className = "stage error";
+      stage.textContent = error instanceof TypeError
+        ? "Lost contact with the app's engine. Check that Terminal is still running it, then try again."
+        : error.message;
+    } finally {
+      clearInterval(tick);
+      again.disabled = false;
+    }
+  }
+
+  $("go").addEventListener("click", () => {
+    enqueue(state.fabrics, state.furniture);
+  });
+
+  fetch("/api/status").then((r) => r.json()).then((s) => {
+    if (s.loaded) $("model").value = s.loaded;
+  }).catch(() => { $("offline").hidden = false; });
+
+  refreshButton();
+})();
+</script>
+</body>
+</html>
